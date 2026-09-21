@@ -28,6 +28,9 @@
 
 :root {
   color-scheme: dark;
+  /* Painted on the root as well as the body: some hosts pad :root for the
+     phone's safe-area insets, and an unpainted root shows through there. */
+  background: var(--color-base);
 }
 
 body {

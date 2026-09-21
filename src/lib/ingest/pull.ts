@@ -17,15 +17,27 @@ import { putSource } from "./store";
 export interface FieldMapping {
   /** Dotted path to the array of games. Omit if the body is already an array. */
   lines?: string;
+  /** All relative to a game. */
   home: string;
   away: string;
   commenceTime?: string;
   sport?: string;
+  /**
+   * Path, relative to a game, to an array of market objects — the common
+   * shape where one game carries its moneyline, spread and total together.
+   *
+   * When set, `market` and `outcomes` resolve against each market object and
+   * every market becomes its own line. Without it only one market per game
+   * could ever be read.
+   */
+  markets?: string;
+  /** Relative to a market object when `markets` is set, else to the game. */
   market?: string;
   /** Fixed market key, for endpoints that serve one market per URL. */
   marketKey?: string;
-  /** Dotted path, relative to a game, to its array of outcomes. */
+  /** Relative to a market object when `markets` is set, else to the game. */
   outcomes: string;
+  /** All relative to an outcome. */
   outcomeName: string;
   american?: string;
   decimal?: string;
@@ -86,31 +98,50 @@ function asString(value: unknown): string | undefined {
  * access or credentials.
  */
 export function applyMapping(body: unknown, config: PullSourceConfig): IngestPayload {
-  const raw = config.mapping.lines ? readPath(body, config.mapping.lines) : body;
+  const { mapping } = config;
+  const raw = mapping.lines ? readPath(body, mapping.lines) : body;
   const games = Array.isArray(raw) ? raw : [];
 
-  const lines = games.map((game) => {
-    const outcomesRaw = readPath(game, config.mapping.outcomes);
-    const outcomes = Array.isArray(outcomesRaw) ? outcomesRaw : [];
+  const lines: IngestPayload["lines"] = [];
 
-    return {
-      home: asString(readPath(game, config.mapping.home)) ?? "",
-      away: asString(readPath(game, config.mapping.away)) ?? "",
-      sport: asString(readPath(game, config.mapping.sport)),
-      commenceTime: asString(readPath(game, config.mapping.commenceTime)),
-      market:
-        config.mapping.marketKey ??
-        asString(readPath(game, config.mapping.market)) ??
-        "h2h",
-      outcomes: outcomes.map((outcome) => ({
-        name: asString(readPath(outcome, config.mapping.outcomeName)) ?? "",
-        american: asNumber(readPath(outcome, config.mapping.american)),
-        decimal: asNumber(readPath(outcome, config.mapping.decimal)),
-        point: asNumber(readPath(outcome, config.mapping.point)),
-        description: asString(readPath(outcome, config.mapping.description)),
-      })),
-    };
-  });
+  for (const game of games) {
+    const home = asString(readPath(game, mapping.home)) ?? "";
+    const away = asString(readPath(game, mapping.away)) ?? "";
+    const sport = asString(readPath(game, mapping.sport));
+    const commenceTime = asString(readPath(game, mapping.commenceTime));
+
+    // Either the game carries an array of markets, or it *is* one market.
+    const marketNodes = mapping.markets
+      ? (() => {
+          const found = readPath(game, mapping.markets);
+          return Array.isArray(found) ? found : [];
+        })()
+      : [game];
+
+    for (const node of marketNodes) {
+      const outcomesRaw = readPath(node, mapping.outcomes);
+      const outcomes = Array.isArray(outcomesRaw) ? outcomesRaw : [];
+      if (outcomes.length === 0) continue;
+
+      lines.push({
+        home,
+        away,
+        sport,
+        commenceTime,
+        market:
+          config.mapping.marketKey ??
+          asString(readPath(node, mapping.market)) ??
+          "h2h",
+        outcomes: outcomes.map((outcome) => ({
+          name: asString(readPath(outcome, mapping.outcomeName)) ?? "",
+          american: asNumber(readPath(outcome, mapping.american)),
+          decimal: asNumber(readPath(outcome, mapping.decimal)),
+          point: asNumber(readPath(outcome, mapping.point)),
+          description: asString(readPath(outcome, mapping.description)),
+        })),
+      });
+    }
+  }
 
   return {
     book: {

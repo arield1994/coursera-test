@@ -27,7 +27,8 @@ cp .env.example .env
 ```
 
 ```bash
-npm test             # 82 tests over the odds/EV/arbitrage/ingest engine
+npm test             # 93 tests over the odds/EV/arbitrage/ingest engine
+npm run demo         # build the standalone browser demo and serve it
 npm run typecheck
 npm run build
 ```
@@ -98,6 +99,55 @@ Each post replaces that book's lines by default; send `"replace": false` to
 update one sport at a time. Lines expire after `ttlSeconds` (default 120), so a
 scraper that dies disappears from the board instead of leaving stale prices up.
 
+### Finding your book's endpoint
+
+If you don't already know your book's API, you don't have to guess. Almost every
+sportsbook site is a JavaScript front end talking to its own JSON API, and the
+browser will show you exactly where:
+
+1. Open the book's odds page with DevTools on the **Network** tab, filtered to
+   **Fetch/XHR**, and reload so the tab is recording from the start.
+2. Click through to a page that actually shows prices.
+3. Right-click the request list and **Save all as HAR**.
+
+Then let EdgeScan read it:
+
+```bash
+npm run discover -- capture.har mybookie
+```
+
+It scores every JSON response for how much it looks like odds, ignores the
+tracking and asset noise, and prints a ready-to-paste `CUSTOM_SOURCES` entry
+with the mapping already worked out — which field holds the teams, where the
+markets and outcomes are nested, whether prices are American or decimal, and
+which request headers you'll need to supply:
+
+```
+1. [96% confidence] GET https://api.example/v3/offering/events?sport=basketball
+   2 games, 2 outcomes in the first game
+   likely required headers: Authorization, X-Api-Key
+```
+
+Header *values* are deliberately not copied out of the capture. **A HAR contains
+live session tokens — treat it like a password file, and don't commit or share
+it.** The generated config has `REPLACE_WITH_YOUR_*` placeholders to fill in
+yourself. `.har` is gitignored for this reason.
+
+Check the result in **Sources → Pull from an API** before trusting it: paste a
+real response and confirm the mapping preview parses it the way you expect.
+
+A few things the capture may not show you. Some books stream odds over a
+**WebSocket** rather than HTTP, which a HAR won't record — look for a `WS` entry
+in DevTools and read its frames by hand. Endpoints are often **geo-fenced** and
+tied to a session, so the headers matter as much as the URL. And these are
+private APIs: they can change without notice, they usually sit behind terms that
+restrict automated access, and hammering one is the fastest way to get an
+account limited. Poll at a sane interval — `ttlSeconds` of 60 with
+`CUSTOM_SOURCE_TTL_MS` at 20s is already gentler than most people manage.
+
+If your book publishes an **official** API or data feed, prefer it: it's stable,
+it's permitted, and it usually returns cleaner data than the site's internal one.
+
 ### Pull: we fetch from your API
 
 Set `CUSTOM_SOURCES` to a JSON array of endpoints and EdgeScan polls them for
@@ -118,6 +168,21 @@ paths translates whatever it returns:
     "outcomes": "selections", "outcomeName": "label", "american": "price_us"
   }
 }]
+```
+
+When a game carries several markets together — the usual shape — point
+`markets` at that array and `market` / `outcomes` resolve against each one, so
+the moneyline, spread and total all come through as separate lines instead of
+only the first:
+
+```json
+"mapping": {
+  "lines": "events",
+  "home": "home_team", "away": "away_team", "commenceTime": "start_time",
+  "markets": "markets", "market": "market_type",
+  "outcomes": "outcomes", "outcomeName": "name",
+  "american": "price", "point": "line"
+}
 ```
 
 ### Sharp or soft
@@ -199,7 +264,9 @@ src/lib/odds/      american.ts (conversions, overround) · types.ts (feed model,
 src/lib/ev/        devig.ts · ev.ts (EV, Kelly, CLV) · scanner.ts · arbitrage.ts
 src/lib/ingest/    types.ts (payload + validation) · store.ts (TTL, per source)
                    merge.ts (attach onto the board) · pull.ts (private APIs)
-                   auth.ts (shared-secret guard)
+                   auth.ts (shared-secret guard) · discover.ts (find an API)
+scripts/discover.ts CLI: read a browser HAR, infer the endpoint and mapping
+demo/              standalone browser build of the real app (no server)
 src/lib/providers/ theOddsApi.ts (live) · mock.ts (demo feed) · index.ts
 src/lib/cache.ts   TTL cache with in-flight request de-duplication
 src/app/api/       scan · arbitrage · middles · odds · sports · ingest · sources
