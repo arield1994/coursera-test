@@ -49,6 +49,21 @@ class ConfigError(ValueError):
 class BookConfig:
     name: str = "MSB247"
     lines_file: str = "lines.csv"
+    url: str = ""                 # your book's base URL, for click-through
+    bet_url_template: str = ""    # e.g. "https://book.com/wager?game={event_id}"
+
+
+@dataclass
+class DashboardConfig:
+    """Settings for `evscan serve`."""
+
+    host: str = "127.0.0.1"       # localhost only; this is not a public app
+    port: int = 8000
+    refresh_seconds: float = 45.0     # how often to re-price the board
+    poll_seconds: float = 5.0         # how often the page re-reads the JSON
+    alert_min_ev: float = 0.02        # sound/notification threshold
+    movement_window: float = 45.0     # minutes of history for "has it moved"
+    output: str = "results.json"      # written on every refresh
 
 
 @dataclass
@@ -101,6 +116,7 @@ class Config:
     market: MarketConfig = field(default_factory=MarketConfig)
     filters: FilterConfig = field(default_factory=FilterConfig)
     bankroll: BankrollConfig = field(default_factory=BankrollConfig)
+    dashboard: DashboardConfig = field(default_factory=DashboardConfig)
     http_book: object | None = None   # populated from [book.http], if present
     sports: list[str] = field(
         default_factory=lambda: [
@@ -171,6 +187,7 @@ def load(explicit: str | None = None) -> Config:
         ("market", cfg.market),
         ("filters", cfg.filters),
         ("bankroll", cfg.bankroll),
+        ("dashboard", cfg.dashboard),
     ):
         if name in raw:
             _merge(raw[name], target)

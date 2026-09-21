@@ -313,3 +313,100 @@ def test_jsonpath_wildcards():
     doc = {"a": {"b": [{"c": 1}, {"c": 2}]}}
     assert select(doc, "a.b[*].c") == [1, 2]
     assert select(doc, "a.missing") == []
+
+
+# ----------------------------------------------------- movement & dashboard
+
+from evscan.dashboard import _starts_in, bet_url, staleness
+from evscan.movement import History, Movement, selection_key
+
+
+def test_starts_in_carries_minutes_into_hours():
+    """18h 59.6m must not render as '18h 60m'."""
+    soon = datetime.now(timezone.utc) + timedelta(hours=18, minutes=59, seconds=40)
+    label = _starts_in(soon)
+    assert "60m" not in label
+    assert label.startswith("18h")
+
+
+def test_starts_in_handles_live_and_days():
+    assert _starts_in(datetime.now(timezone.utc) - timedelta(minutes=5)) == "live"
+    assert _starts_in(datetime.now(timezone.utc) + timedelta(days=2, hours=3)).startswith("2d")
+
+
+def _history(tmp_path):
+    return History(tmp_path / "h.db")
+
+
+def test_history_detects_a_sharp_move(tmp_path):
+    history = _history(tmp_path)
+    for price in (128, 124, 120, 118):
+        event = _event(quotes=[Quote("pinnacle", "h2h", (
+            Outcome("Buffalo Bills", price), Outcome("Kansas City Chiefs", -price - 15)))])
+        history.record([event])
+    move = history.movement("e1", "h2h", "buffalo bills", None, "pinnacle")
+    assert move.samples == 4
+    assert move.delta_cents == -10
+    assert move.direction == "toward"
+    assert move.is_significant
+
+
+def test_history_reports_no_movement_on_a_single_sample(tmp_path):
+    history = _history(tmp_path)
+    history.record([_event(quotes=[Quote("pinnacle", "h2h", (
+        Outcome("Buffalo Bills", 128), Outcome("Kansas City Chiefs", -140)))])])
+    move = history.movement("e1", "h2h", "buffalo bills", None, "pinnacle")
+    assert move.samples == 1 and not move.is_significant
+
+
+def test_opportunity_age_grows_and_flags_new(tmp_path):
+    history = _history(tmp_path)
+    key = selection_key("e1", "h2h", "Buffalo Bills", None)
+    first = history.touch_opportunity(key, 0.05)
+    assert first.is_new and first.seconds == 0.0
+    second = history.touch_opportunity(key, 0.07)
+    assert second.first_seen == first.first_seen
+    assert second.best_ev == 0.07
+
+
+def test_stale_score_is_zero_when_the_book_followed():
+    """A move both sides made is a disagreement, not a stale line."""
+    sharp = Movement(delta_prob=0.03, delta_cents=-20, samples=5, minutes=30)
+    followed = Movement(delta_prob=0.03, delta_cents=-20, samples=5, minutes=30)
+    assert staleness(sharp, followed) == 0.0
+
+
+def test_stale_score_rises_when_the_book_lags():
+    sharp = Movement(delta_prob=0.05, delta_cents=-30, samples=5, minutes=30)
+    frozen = Movement(delta_prob=0.0, delta_cents=0, samples=5, minutes=30)
+    assert staleness(sharp, frozen) == 1.0
+
+
+def test_stale_score_ignores_an_insignificant_move():
+    tiny = Movement(delta_prob=0.001, delta_cents=-1, samples=5, minutes=30)
+    frozen = Movement(delta_prob=0.0, delta_cents=0, samples=5, minutes=30)
+    assert staleness(tiny, frozen) == 0.0
+
+
+def test_bet_url_survives_a_broken_template():
+    config = Config()
+    config.book.url = "https://example.com"
+    config.book.bet_url_template = "https://example.com/{not_a_field}"
+    result = scan([_line()], [_event(quotes=_market_quotes())], config)
+    assert bet_url(config, result.opportunities[0]) == "https://example.com"
+
+
+def test_bet_url_fills_the_template():
+    config = Config()
+    config.book.bet_url_template = "https://b.com/w?g={event_id}&m={market}"
+    result = scan([_line()], [_event(quotes=_market_quotes())], config)
+    assert bet_url(config, result.opportunities[0]) == "https://b.com/w?g=e1&m=h2h"
+
+
+def test_demo_market_produces_scannable_lines():
+    """The demo must exercise the real engine, not fake its output."""
+    from evscan.demo import build_market
+    events, lines = build_market(seed=7)
+    assert events and lines
+    result = scan(lines, events, Config())
+    assert result.lines_scanned == len(lines)

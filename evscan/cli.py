@@ -171,6 +171,81 @@ def _gather_lines(cfg: config_module.Config, args) -> list[BookLine]:
     return load_lines(args.lines or cfg.book.lines_file, cfg.book.name)
 
 
+def _fetch_events(cfg: config_module.Config, lines, args) -> tuple[list, str]:
+    """Pull the sharp market for whatever sports the board actually covers."""
+    api = TheOddsAPI(cfg.api_key, cache_ttl=0 if getattr(args, "no_cache", False) else 300.0)
+    markets = markets_needed(lines)
+    events = []
+    for sport in sports_needed(lines, cfg):
+        try:
+            events.extend(api.odds(sport, markets=markets,
+                                   regions=cfg.market.regions,
+                                   use_cache=not getattr(args, "no_cache", False)))
+        except OddsAPIError as exc:
+            print(f"warning: {sport}: {exc}", file=sys.stderr)
+    return events, api.quota.describe()
+
+
+def cmd_serve(args) -> int:
+    """Run the live dashboard."""
+    from .dashboard import build_payload, serve
+    from .movement import History
+
+    try:
+        cfg = _load_config(args)
+    except ConfigError as exc:
+        print(f"config error: {exc}", file=sys.stderr)
+        return 1
+
+    if args.port:
+        cfg.dashboard.port = args.port
+    if args.refresh:
+        cfg.dashboard.refresh_seconds = args.refresh
+    if args.bankroll is not None:
+        cfg.bankroll.amount = args.bankroll
+    if args.min_ev is not None:
+        cfg.filters.min_ev = args.min_ev
+
+    history = History(args.history)
+
+    if not args.demo and not cfg.api_key:
+        print(
+            "error: ODDS_API_KEY is not set.\n"
+            "  Get a free key at https://the-odds-api.com, then:\n"
+            "      export ODDS_API_KEY='your-key'\n"
+            "  Or see the dashboard working right now with no key:\n"
+            "      python3 -m evscan serve --demo",
+            file=sys.stderr,
+        )
+        return 1
+
+    def scan_once() -> dict:
+        if args.demo:
+            from .demo import build_market
+            events, lines = build_market()
+            quota = "demo mode -- simulated market, no credits used"
+        else:
+            lines = _gather_lines(cfg, args)
+            events, quota = _fetch_events(cfg, lines, args)
+            if not events:
+                raise RuntimeError("the odds feed returned no events")
+
+        history.record(events)
+        result = scan(lines, events, cfg, min_ev=cfg.filters.min_ev)
+        # Record your book's prices too -- staleness is the comparison
+        # between how far the sharps moved and how far your book did not.
+        history.record_book_lines(result.matched, cfg.book.name)
+        return build_payload(result, cfg, history, quota=quota)
+
+    if args.demo:
+        print("demo mode: simulated sharp market with a lagging private book")
+    try:
+        return serve(scan_once, cfg, open_browser=not args.no_browser)
+    finally:
+        history.prune()
+        history.close()
+
+
 def cmd_scan(args) -> int:
     style = _style()
     try:
@@ -436,6 +511,24 @@ def build_parser() -> argparse.ArgumentParser:
     p_devig = sub.add_parser("devig", help="compare margin-removal methods on a market")
     p_devig.add_argument("prices", nargs="+", help="every side, e.g. -140 +120")
     p_devig.set_defaults(func=cmd_devig)
+
+    p_serve = sub.add_parser("serve", help="run the live edge dashboard")
+    p_serve.add_argument("--demo", action="store_true",
+                         help="simulated market; no API key or book feed needed")
+    p_serve.add_argument("-p", "--port", type=int, help="port (default 8000)")
+    p_serve.add_argument("--refresh", type=float,
+                         help="seconds between re-pricing (default 45)")
+    p_serve.add_argument("--min-ev", type=float, help="EV threshold, e.g. 0.02")
+    p_serve.add_argument("--bankroll", type=float, help="override bankroll")
+    p_serve.add_argument("-l", "--lines", help="path to your lines CSV")
+    p_serve.add_argument("--csv", action="store_true",
+                         help="force the CSV source even if book.http is set")
+    p_serve.add_argument("--history", default=".evscan-history.db",
+                         help="where line history is kept")
+    p_serve.add_argument("--no-browser", action="store_true",
+                         help="do not open a browser window")
+    p_serve.add_argument("--no-cache", action="store_true")
+    p_serve.set_defaults(func=cmd_serve)
 
     p_sports = sub.add_parser("sports", help="list sports the feed covers")
     p_sports.add_argument("--all", action="store_true", help="include out-of-season")

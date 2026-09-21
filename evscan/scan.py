@@ -19,6 +19,7 @@ class ScanResult:
     opportunities: list[Opportunity] = field(default_factory=list)
     failures: list[MatchFailure] = field(default_factory=list)
     rejected: list[tuple[BookLine, float]] = field(default_factory=list)
+    matched: list[tuple[BookLine, Event]] = field(default_factory=list)
     lines_scanned: int = 0
 
     @property
@@ -81,6 +82,8 @@ def scan(
         if event is None:
             result.failures.append(MatchFailure(line, reason))
             continue
+
+        result.matched.append((line, event))
 
         skip = _passes_filters(line, event, config)
         if skip:

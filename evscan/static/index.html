@@ -1,0 +1,381 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="dark">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Edge Board</title>
+<style>
+  :root {
+    --bg: #0f1216; --panel: #161b22; --panel-2: #1c232c; --line: #2a323d;
+    --text: #e6edf3; --muted: #8b949e; --dim: #6e7681;
+    --good: #3fb950; --good-dim: #1f6f33; --warn: #d29922; --bad: #f85149;
+    --accent: #58a6ff; --stale: #bc8cff;
+    --mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, monospace;
+  }
+  :root[data-theme="light"] {
+    --bg: #ffffff; --panel: #f6f8fa; --panel-2: #eaeef2; --line: #d0d7de;
+    --text: #1f2328; --muted: #656d76; --dim: #8c959f;
+    --good: #1a7f37; --good-dim: #2da44e; --warn: #9a6700; --bad: #cf222e;
+    --accent: #0969da; --stale: #8250df;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: var(--bg); color: var(--text);
+    font: 14px/1.45 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  }
+  header {
+    position: sticky; top: 0; z-index: 10; background: var(--panel);
+    border-bottom: 1px solid var(--line); padding: 10px 16px;
+    display: flex; align-items: center; gap: 16px; flex-wrap: wrap;
+  }
+  h1 { font-size: 15px; margin: 0; font-weight: 600; letter-spacing: .2px; }
+  h1 span { color: var(--muted); font-weight: 400; }
+  .stats { display: flex; gap: 18px; margin-left: auto; flex-wrap: wrap; }
+  .stat { font-size: 12px; color: var(--muted); white-space: nowrap; }
+  .stat b { color: var(--text); font-family: var(--mono); font-weight: 600; }
+  .controls { display: flex; gap: 8px; align-items: center; }
+  button {
+    background: var(--panel-2); color: var(--text); border: 1px solid var(--line);
+    border-radius: 6px; padding: 5px 10px; font-size: 12px; cursor: pointer;
+    font-family: inherit;
+  }
+  button:hover { border-color: var(--accent); }
+  button.on { background: var(--good-dim); border-color: var(--good); color: #fff; }
+  .pulse { display: inline-block; width: 7px; height: 7px; border-radius: 50%;
+           background: var(--good); margin-right: 6px; }
+  .pulse.stale-feed { background: var(--warn); animation: blink 1s infinite; }
+  .pulse.dead { background: var(--bad); }
+  @keyframes blink { 50% { opacity: .25; } }
+
+  main { padding: 16px; max-width: 1500px; margin: 0 auto; }
+  .banner {
+    background: var(--panel); border: 1px solid var(--warn); border-left-width: 3px;
+    border-radius: 6px; padding: 10px 14px; margin-bottom: 14px; font-size: 13px;
+  }
+  .banner.err { border-color: var(--bad); }
+
+  table { width: 100%; border-collapse: collapse; }
+  thead th {
+    text-align: left; font-size: 11px; text-transform: uppercase;
+    letter-spacing: .6px; color: var(--dim); font-weight: 600;
+    padding: 8px 10px; border-bottom: 1px solid var(--line); white-space: nowrap;
+  }
+  tbody tr {
+    border-bottom: 1px solid var(--line); background: var(--panel);
+    transition: background .25s;
+  }
+  tbody tr:hover { background: var(--panel-2); }
+  tbody td { padding: 10px; vertical-align: middle; }
+  .num { font-family: var(--mono); font-variant-numeric: tabular-nums; }
+
+  .matchup { font-weight: 600; }
+  .sub { font-size: 11.5px; color: var(--muted); margin-top: 2px; }
+  .bet { font-weight: 600; }
+  .price-you { font-size: 16px; font-weight: 700; color: var(--good); }
+  .price-fair { color: var(--muted); }
+  .ev { font-size: 16px; font-weight: 700; }
+  .ev.hot { color: var(--good); }
+  .ev.mid { color: var(--warn); }
+  .ev-sub { font-size: 11px; color: var(--dim); font-weight: 400; }
+
+  .tag {
+    display: inline-block; font-size: 10.5px; padding: 2px 6px; border-radius: 4px;
+    border: 1px solid var(--line); color: var(--muted); white-space: nowrap;
+  }
+  .tag.new { background: var(--good-dim); border-color: var(--good); color: #fff;
+             font-weight: 700; animation: blink 1.1s 6; }
+  .tag.stale { background: rgba(188,140,255,.14); border-color: var(--stale);
+               color: var(--stale); font-weight: 600; }
+  .tag.warn { border-color: var(--warn); color: var(--warn); }
+  .tag.bad  { border-color: var(--bad); color: var(--bad); }
+
+  tr.flash { animation: flashrow 2.4s ease-out; }
+  @keyframes flashrow {
+    0% { background: rgba(63,185,80,.30); }
+    100% { background: var(--panel); }
+  }
+  tr.dying { opacity: .4; }
+
+  .betbtn {
+    display: inline-block; background: var(--good-dim); color: #fff;
+    border: 1px solid var(--good); border-radius: 6px; padding: 7px 14px;
+    text-decoration: none; font-weight: 700; font-size: 13px; white-space: nowrap;
+  }
+  .betbtn:hover { filter: brightness(1.25); }
+  .betbtn.off { background: var(--panel-2); border-color: var(--line);
+                color: var(--dim); cursor: not-allowed; }
+
+  svg.spark { display: block; }
+  .empty { text-align: center; padding: 60px 20px; color: var(--muted); }
+  .empty h2 { color: var(--text); font-size: 17px; margin: 0 0 6px; }
+  details { margin-top: 20px; }
+  summary { cursor: pointer; color: var(--muted); font-size: 12.5px; padding: 6px 0; }
+  .mini { font-size: 12px; color: var(--muted); padding: 3px 0 3px 14px; }
+  .mini b { color: var(--text); font-weight: 500; }
+</style>
+</head>
+<body>
+<header>
+  <h1><span id="pulse" class="pulse"></span>Edge Board <span id="bookname"></span></h1>
+  <div class="stats">
+    <div class="stat">live <b id="s-count">0</b></div>
+    <div class="stat">stake <b id="s-stake">0</b></div>
+    <div class="stat">exp. profit <b id="s-profit">0</b></div>
+    <div class="stat">scanned <b id="s-scanned">0</b></div>
+    <div class="stat">updated <b id="s-updated">--</b></div>
+    <div class="stat" id="s-quota"></div>
+  </div>
+  <div class="controls">
+    <button id="btn-sound" title="Beep when a new edge appears">Sound off</button>
+    <button id="btn-notify" title="Desktop notification for new edges">Notify off</button>
+    <button id="btn-theme" title="Toggle theme">Light</button>
+  </div>
+</header>
+
+<main>
+  <div id="banner"></div>
+  <div id="content"></div>
+  <details id="extras" hidden>
+    <summary>Lines that did not clear the threshold, and ones that could not be priced</summary>
+    <div id="below"></div>
+    <div id="unpriced"></div>
+  </details>
+</main>
+
+<script>
+"use strict";
+
+const state = {
+  seen: new Map(),       // id -> last payload for that bet
+  sound: false,
+  notify: false,
+  lastGenerated: 0,
+  pollMs: 5000,
+  alertMinEv: 2,
+};
+
+/* ---------- small helpers ---------- */
+
+const $ = (id) => document.getElementById(id);
+const esc = (s) => String(s ?? "").replace(/[&<>"']/g,
+  (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+const money = (n) => n.toLocaleString(undefined, { maximumFractionDigits: 0 });
+
+function ageLabel(seconds) {
+  if (seconds < 60) return seconds.toFixed(0) + "s";
+  if (seconds < 3600) return (seconds / 60).toFixed(0) + "m";
+  return (seconds / 3600).toFixed(1) + "h";
+}
+
+/* A short two-tone chirp. Generated, so the page needs no audio file. */
+function beep() {
+  if (!state.sound) return;
+  try {
+    const ctx = new (window.AudioContext || window.webkitAudioContext)();
+    [880, 1320].forEach((freq, i) => {
+      const osc = ctx.createOscillator(), gain = ctx.createGain();
+      osc.frequency.value = freq;
+      osc.type = "sine";
+      gain.gain.setValueAtTime(0.0001, ctx.currentTime + i * 0.12);
+      gain.gain.exponentialRampToValueAtTime(0.28, ctx.currentTime + i * 0.12 + 0.01);
+      gain.gain.exponentialRampToValueAtTime(0.0001, ctx.currentTime + i * 0.12 + 0.11);
+      osc.connect(gain); gain.connect(ctx.destination);
+      osc.start(ctx.currentTime + i * 0.12);
+      osc.stop(ctx.currentTime + i * 0.12 + 0.12);
+    });
+  } catch (e) { /* audio blocked until the user interacts; not fatal */ }
+}
+
+function notify(bet) {
+  if (!state.notify || Notification.permission !== "granted") return;
+  const n = new Notification(`${bet.ev_pct}% edge  ${bet.your_price}`, {
+    body: `${bet.bet}\n${bet.matchup}  (fair ${bet.fair_price})`,
+    tag: bet.id, renotify: false,
+  });
+  n.onclick = () => { window.focus(); if (bet.url) window.open(bet.url, "_blank"); };
+}
+
+/* Sharp-market sparkline. Flat line when there is not enough history yet. */
+function sparkline(series) {
+  if (!series || series.length < 2) return '<span class="tag">no history</span>';
+  const w = 74, h = 22, pad = 2;
+  const min = Math.min(...series), max = Math.max(...series);
+  const span = (max - min) || 1;
+  const pts = series.map((v, i) => {
+    const x = pad + (i / (series.length - 1)) * (w - pad * 2);
+    const y = h - pad - ((v - min) / span) * (h - pad * 2);
+    return `${x.toFixed(1)},${y.toFixed(1)}`;
+  }).join(" ");
+  const rising = series[series.length - 1] > series[0];
+  const color = rising ? "var(--bad)" : "var(--good)";
+  return `<svg class="spark" width="${w}" height="${h}" viewBox="0 0 ${w} ${h}">
+    <polyline points="${pts}" fill="none" stroke="${color}" stroke-width="1.5"
+      stroke-linejoin="round" stroke-linecap="round"/>
+  </svg>`;
+}
+
+/* ---------- rendering ---------- */
+
+function rowHtml(bet, isNew) {
+  const evClass = bet.ev_pct >= 4 ? "hot" : bet.ev_pct >= 2 ? "mid" : "";
+  const tags = [];
+  if (isNew || bet.is_new) tags.push('<span class="tag new">NEW</span>');
+  if (bet.stale_score >= 0.3) {
+    tags.push(`<span class="tag stale" title="${esc(bet.movement.text)}">STALE ${Math.round(bet.stale_score * 100)}</span>`);
+  }
+  (bet.warnings || []).forEach((w) => {
+    const cls = w.startsWith("-EV") ? "bad" : "warn";
+    tags.push(`<span class="tag ${cls}" title="${esc(w)}">${esc(w.split(" --")[0])}</span>`);
+  });
+
+  const btn = bet.url
+    ? `<a class="betbtn" href="${esc(bet.url)}" target="_blank" rel="noopener">BET</a>`
+    : `<span class="betbtn off" title="Set book.bet_url_template in evscan.toml">no link</span>`;
+
+  return `<tr data-id="${esc(bet.id)}" class="${isNew ? "flash" : ""}">
+    <td>
+      <div class="matchup">${esc(bet.matchup)}</div>
+      <div class="sub">starts in ${esc(bet.starts_in)} &middot; ${esc(bet.market)}</div>
+    </td>
+    <td><div class="bet">${esc(bet.bet)}</div>
+        <div class="sub">${bet.book_count} books &middot; hold ${bet.mean_hold_pct}%</div></td>
+    <td class="num price-you">${esc(bet.your_price)}</td>
+    <td class="num price-fair">${esc(bet.fair_price)}
+        <div class="sub num">${bet.edge_cents >= 0 ? "+" : ""}${bet.edge_cents}&cent;</div></td>
+    <td class="num ev ${evClass}">${bet.ev_pct > 0 ? "+" : ""}${bet.ev_pct}%
+        <div class="ev-sub num">worst ${bet.ev_conservative_pct > 0 ? "+" : ""}${bet.ev_conservative_pct}%</div></td>
+    <td class="num"><b>${money(bet.stake)}</b><div class="sub num">${bet.kelly_pct}% K</div></td>
+    <td>${sparkline(bet.movement.series)}
+        <div class="sub">${esc(bet.movement.text)}</div></td>
+    <td class="num" data-age="${bet.age_seconds}" data-since="${Date.now()}">
+        ${esc(bet.age_label)}</td>
+    <td>${tags.join(" ")}</td>
+    <td>${btn}</td>
+  </tr>`;
+}
+
+function render(data) {
+  $("bookname").textContent = data.book_name ? `· ${data.book_name} vs sharps` : "";
+  $("s-count").textContent = data.bets.length;
+  $("s-stake").textContent = money(data.total_stake);
+  $("s-profit").textContent = (data.expected_profit >= 0 ? "+" : "") + money(data.expected_profit);
+  $("s-scanned").textContent = data.lines_scanned;
+  $("s-updated").textContent = data.generated_label;
+  $("s-quota").innerHTML = data.quota ? `feed <b>${esc(data.quota)}</b>` : "";
+  state.pollMs = (data.poll_seconds || 5) * 1000;
+  state.alertMinEv = data.alert_min_ev || 2;
+
+  const banner = $("banner");
+  banner.innerHTML = data.error
+    ? `<div class="banner err"><b>Scan failed:</b> ${esc(data.error)}<br>
+       Showing the last good result. Prices below may be out of date.</div>`
+    : "";
+
+  if (!data.bets.length) {
+    $("content").innerHTML = `<div class="empty">
+      <h2>No edges right now</h2>
+      <p>That is the normal state. ${data.lines_scanned} lines scanned;
+         the page refreshes itself.</p></div>`;
+  } else {
+    const rows = data.bets.map((bet) => {
+      const isNew = !state.seen.has(bet.id);
+      if (isNew && bet.alert && bet.ev_pct >= state.alertMinEv) { beep(); notify(bet); }
+      return rowHtml(bet, isNew);
+    }).join("");
+
+    $("content").innerHTML = `<table>
+      <thead><tr>
+        <th>Matchup</th><th>Bet</th><th>Yours</th><th>Fair</th><th>EV</th>
+        <th>Stake</th><th>Sharp move</th><th>Age</th><th></th><th></th>
+      </tr></thead><tbody>${rows}</tbody></table>`;
+  }
+
+  // Remember what we have shown so the next poll can spot genuinely new rows.
+  const ids = new Set(data.bets.map((b) => b.id));
+  state.seen.forEach((_v, id) => { if (!ids.has(id)) state.seen.delete(id); });
+  data.bets.forEach((b) => state.seen.set(b.id, b));
+
+  const extras = $("extras");
+  const hasExtras = (data.below_threshold || []).length || (data.unpriced || []).length;
+  extras.hidden = !hasExtras;
+  if (hasExtras) {
+    $("below").innerHTML = (data.below_threshold || []).map((r) =>
+      `<div class="mini"><b>${esc(r.line)}</b> — ${esc(r.matchup)} — ${r.ev_pct}%</div>`).join("");
+    $("unpriced").innerHTML = (data.unpriced || []).map((r) =>
+      `<div class="mini"><b>${esc(r.line)}</b> — ${esc(r.matchup)} — ${esc(r.reason)}</div>`).join("");
+  }
+}
+
+/* Ages tick locally between polls, so the board never looks frozen. */
+setInterval(() => {
+  document.querySelectorAll("td[data-age]").forEach((cell) => {
+    const base = parseFloat(cell.dataset.age);
+    const drift = (Date.now() - parseFloat(cell.dataset.since)) / 1000;
+    cell.firstChild.nodeValue = ageLabel(base + drift);
+  });
+}, 1000);
+
+/* ---------- polling ---------- */
+
+async function poll() {
+  const pulse = $("pulse");
+  try {
+    const res = await fetch("results.json?t=" + Date.now(), { cache: "no-store" });
+    if (!res.ok) throw new Error("HTTP " + res.status);
+    const data = await res.json();
+    if (data.generated_at !== state.lastGenerated) {
+      state.lastGenerated = data.generated_at;
+      render(data);
+    }
+    // Warn when the file itself has stopped updating -- a dead scanner
+    // showing old prices is worse than showing nothing.
+    const age = Date.now() / 1000 - data.generated_at;
+    pulse.className = "pulse" + (age > (data.refresh_seconds || 45) * 3 ? " stale-feed" : "");
+    pulse.title = `results.json is ${age.toFixed(0)}s old`;
+  } catch (err) {
+    pulse.className = "pulse dead";
+    pulse.title = "cannot read results.json: " + err.message;
+    $("banner").innerHTML = `<div class="banner err">
+      <b>Not receiving data.</b> Is <code>python3 -m evscan serve</code> still running?
+      (${esc(err.message)})</div>`;
+  } finally {
+    setTimeout(poll, state.pollMs);
+  }
+}
+
+/* ---------- controls ---------- */
+
+$("btn-sound").onclick = (e) => {
+  state.sound = !state.sound;
+  e.target.textContent = state.sound ? "Sound on" : "Sound off";
+  e.target.classList.toggle("on", state.sound);
+  if (state.sound) beep();          // also unlocks audio for later alerts
+};
+
+$("btn-notify").onclick = async (e) => {
+  if (!("Notification" in window)) { e.target.textContent = "unsupported"; return; }
+  if (Notification.permission !== "granted") await Notification.requestPermission();
+  state.notify = Notification.permission === "granted" && !state.notify;
+  e.target.textContent = state.notify ? "Notify on" : "Notify off";
+  e.target.classList.toggle("on", state.notify);
+};
+
+$("btn-theme").onclick = (e) => {
+  const light = document.documentElement.dataset.theme === "light";
+  document.documentElement.dataset.theme = light ? "dark" : "light";
+  e.target.textContent = light ? "Light" : "Dark";
+  try { localStorage.setItem("evscan-theme", light ? "dark" : "light"); } catch (_) {}
+};
+
+try {
+  const saved = localStorage.getItem("evscan-theme");
+  if (saved) {
+    document.documentElement.dataset.theme = saved;
+    $("btn-theme").textContent = saved === "light" ? "Dark" : "Light";
+  }
+} catch (_) { /* private mode; defaults are fine */ }
+
+poll();
+</script>
+</body>
+</html>
