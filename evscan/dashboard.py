@@ -255,6 +255,11 @@ class _Handler(BaseHTTPRequestHandler):
             self._send(page.read_bytes(), "text/html; charset=utf-8")
             return
 
+        if path == "/sniffer.js":
+            script = Path(__file__).parent / "static" / "sniffer.js"
+            self._send(script.read_bytes(), "text/javascript; charset=utf-8")
+            return
+
         if path == "/results.json":
             payload = self.refresher.last_payload if self.refresher else None
             if payload is None and self.output_path and self.output_path.exists():
@@ -275,7 +280,7 @@ class _Handler(BaseHTTPRequestHandler):
             self._send(json.dumps(payload).encode(), "application/json")
             return
 
-        self.send_error(404, "evscan serves / and /results.json only")
+        self.send_error(404, "evscan serves /, /results.json and /sniffer.js only")
 
     def log_message(self, fmt: str, *args) -> None:
         """Silence per-request logging; the page polls every few seconds."""

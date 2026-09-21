@@ -30,6 +30,8 @@ from .oddsmath import (
     prob_to_american,
 )
 from .render import Style, render_csv, render_detail, render_summary, render_table, use_colour
+
+BOLD_CODE = "\033[1m"
 from .scan import markets_needed, scan, sports_needed, stake_for
 from .sources.book_csv import LinesError, load_lines, write_example
 from .sources.the_odds_api import OddsAPIError, TheOddsAPI
@@ -429,6 +431,43 @@ def cmd_devig(args) -> int:
 # ------------------------------------------------------------------ sports
 
 
+def cmd_sniffer(args) -> int:
+    """Print the console snippet that finds your book's odds endpoint.
+
+    Exists because exporting a HAR is fiddly and the file contains live
+    session cookies. The snippet keeps everything in the browser and reports
+    only what is needed to write the adapter.
+    """
+    script = Path(__file__).parent / "static" / "sniffer.js"
+    text = script.read_text(encoding="utf-8")
+
+    if args.out:
+        Path(args.out).write_text(text, encoding="utf-8")
+        print(f"wrote {args.out}")
+    else:
+        print(text)
+
+    if not args.quiet:
+        style = _style()
+        heading = style("How to use it:", BOLD_CODE)
+        steps = f"""
+{heading}
+  1. Log in to your book. Open DevTools (F12) and click the Console tab.
+  2. Chrome may ask you to type 'allow pasting' first -- do that.
+  3. Paste everything above and press Enter.
+  4. Reload the odds board (Ctrl-Shift-R), or click into a league.
+  5. Run:  evscan.report()
+
+  Then paste that report to Claude. It contains no cookies, no tokens and
+  no password -- only URLs, field names and scores. Check it yourself first.
+
+  evscan.shape(1)  shows the field layout of the top candidate
+  evscan.stop()    unhooks it again
+"""
+        print(steps, file=sys.stderr)
+    return 0
+
+
 def cmd_sports(args) -> int:
     try:
         cfg = _load_config(args)
@@ -529,6 +568,14 @@ def build_parser() -> argparse.ArgumentParser:
                          help="do not open a browser window")
     p_serve.add_argument("--no-cache", action="store_true")
     p_serve.set_defaults(func=cmd_serve)
+
+    p_sniff = sub.add_parser(
+        "sniffer", help="print a console snippet that finds your book's endpoint"
+    )
+    p_sniff.add_argument("-o", "--out", help="write to a file instead of stdout")
+    p_sniff.add_argument("-q", "--quiet", action="store_true",
+                         help="script only, no instructions")
+    p_sniff.set_defaults(func=cmd_sniffer)
 
     p_sports = sub.add_parser("sports", help="list sports the feed covers")
     p_sports.add_argument("--all", action="store_true", help="include out-of-season")

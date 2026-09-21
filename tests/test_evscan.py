@@ -410,3 +410,22 @@ def test_demo_market_produces_scannable_lines():
     assert events and lines
     result = scan(lines, events, Config())
     assert result.lines_scanned == len(lines)
+
+
+def test_sniffer_script_ships_and_is_self_contained():
+    """The console snippet is shipped source, not generated at runtime."""
+    script = Path(__file__).resolve().parents[1] / "evscan" / "static" / "sniffer.js"
+    text = script.read_text()
+    assert "window.evscan" in text and "report" in text and "stop" in text
+    # It must never read cookies or ship data anywhere.
+    assert "document.cookie" not in text
+    assert "XMLHttpRequest.prototype.open" in text   # hooks XHR, not just fetch
+
+
+def test_cli_exposes_every_subcommand():
+    from evscan.cli import build_parser
+    parser = build_parser()
+    actions = [a for a in parser._actions if hasattr(a, "choices") and a.choices]
+    names = set(actions[0].choices)
+    assert {"init", "discover", "scan", "quote", "devig",
+            "sports", "serve", "sniffer"} <= names
