@@ -412,14 +412,28 @@ def test_demo_market_produces_scannable_lines():
     assert result.lines_scanned == len(lines)
 
 
+def _strip_js_comments(text: str) -> str:
+    """Crude but sufficient: the assertions below are about code, not prose."""
+    import re
+    text = re.sub(r"/\*.*?\*/", "", text, flags=re.S)
+    return re.sub(r"^\s*//.*$", "", text, flags=re.M)
+
+
 def test_sniffer_script_ships_and_is_self_contained():
     """The console snippet is shipped source, not generated at runtime."""
     script = Path(__file__).resolve().parents[1] / "evscan" / "static" / "sniffer.js"
     text = script.read_text()
     assert "window.evscan" in text and "report" in text and "stop" in text
-    # It must never read cookies or ship data anywhere.
-    assert "document.cookie" not in text
     assert "XMLHttpRequest.prototype.open" in text   # hooks XHR, not just fetch
+
+    code = _strip_js_comments(text)
+    # The snippet must not read credentials or send anything anywhere.
+    assert "document.cookie" not in code
+    assert "navigator.sendBeacon" not in code
+    assert "WebSocket" not in code
+    # It names auth headers so it can report which one carried the token --
+    # but must never store a header value.
+    assert "authorization" in code.lower()
 
 
 def test_cli_exposes_every_subcommand():
