@@ -1,5 +1,13 @@
 import { describe, expect, it } from "vitest";
-import { analyzeHar, inferMapping, toSourceConfig } from "../src/lib/ingest/discover";
+import {
+  analyzeHar,
+  describeShape,
+  findHtmlCandidates,
+  inferMapping,
+  redactUrl,
+  summarizeForSharing,
+  toSourceConfig,
+} from "../src/lib/ingest/discover";
 import { applyMapping } from "../src/lib/ingest/pull";
 import { validatePayload } from "../src/lib/ingest/types";
 
@@ -238,5 +246,121 @@ describe("analyzing a HAR capture", () => {
   it("survives a capture with junk in it", () => {
     expect(analyzeHar({})).toEqual([]);
     expect(analyzeHar({ log: { entries: [{ response: { content: { text: "not json" } } }] } })).toEqual([]);
+  });
+});
+
+describe("server-rendered books", () => {
+  const board = Array.from({ length: 20 }, (_, i) => `<td>Team ${i}</td><td>+${110 + i}</td>`).join("");
+  const har = {
+    log: {
+      entries: [
+        {
+          request: { url: "https://book.example/lines?sport=nba", method: "GET", headers: [] },
+          response: {
+            status: 200,
+            content: { mimeType: "text/html", text: `<html><body><table>${board}</table></body></html>` },
+          },
+        },
+        {
+          request: { url: "https://book.example/about", method: "GET", headers: [] },
+          response: {
+            status: 200,
+            content: { mimeType: "text/html", text: "<html><body>Call us on 555-0100</body></html>" },
+          },
+        },
+      ],
+    },
+  };
+
+  it("spots a page that renders odds into HTML", () => {
+    const found = findHtmlCandidates(har);
+    expect(found).toHaveLength(1);
+    expect(found[0].url).toContain("/lines");
+    expect(found[0].priceCount).toBeGreaterThanOrEqual(20);
+  });
+
+  it("does not mistake stray numbers for a board", () => {
+    expect(findHtmlCandidates(har).some((p) => p.url.includes("/about"))).toBe(false);
+  });
+});
+
+describe("shareable summary", () => {
+  const har = {
+    log: {
+      entries: [
+        {
+          request: {
+            url: "https://api.book.example/v2/events?token=SESSION-SECRET&sport=nba",
+            method: "GET",
+            headers: [
+              { name: "Authorization", value: "Bearer SUPER-SECRET" },
+              { name: "Cookie", value: "sid=PRIVATE-SESSION" },
+            ],
+          },
+          response: {
+            status: 200,
+            content: {
+              mimeType: "application/json",
+              text: JSON.stringify({
+                balance: 4213.55,
+                customer: { email: "me@example.com" },
+                events: [
+                  {
+                    home_team: "Boston Celtics",
+                    away_team: "Los Angeles Lakers",
+                    start_time: "2030-01-01T00:00:00Z",
+                    markets: [
+                      {
+                        market_type: "Moneyline",
+                        outcomes: [
+                          { name: "Los Angeles Lakers", price: 120 },
+                          { name: "Boston Celtics", price: -140 },
+                        ],
+                      },
+                    ],
+                  },
+                ],
+              }),
+            },
+          },
+        },
+      ],
+    },
+  };
+
+  it("keeps query parameter names but drops their values", () => {
+    expect(redactUrl("https://x.example/a?token=abc&sport=nba")).toBe(
+      "https://x.example/a?token=&sport=",
+    );
+    expect(redactUrl("https://x.example/a")).toBe("https://x.example/a");
+  });
+
+  it("describes structure without carrying any values", () => {
+    const shape = describeShape({ a: 1, b: "hello", c: [{ d: true }] }) as Record<string, unknown>;
+    expect(shape.a).toBe("number");
+    expect(shape.b).toBe("string");
+    expect(shape.c).toEqual([{ d: "boolean" }, "…1 items"]);
+  });
+
+  it("leaks nothing sensitive from a real capture", () => {
+    const serialized = JSON.stringify(summarizeForSharing(har));
+
+    for (const secret of [
+      "SUPER-SECRET",
+      "PRIVATE-SESSION",
+      "SESSION-SECRET",
+      "me@example.com",
+      "4213.55",
+      // Even innocuous response values stay out: only structure is shared.
+      "Boston Celtics",
+    ]) {
+      expect(serialized, secret).not.toContain(secret);
+    }
+
+    // But it keeps what is needed to build a mapping.
+    expect(serialized).toContain("Authorization");
+    expect(serialized).toContain("home_team");
+    expect(serialized).toContain("market_type");
+    expect(serialized).toContain("token=");
   });
 });

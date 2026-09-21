@@ -27,7 +27,7 @@ cp .env.example .env
 ```
 
 ```bash
-npm test             # 93 tests over the odds/EV/arbitrage/ingest engine
+npm test             # 98 tests over the odds/EV/arbitrage/ingest engine
 npm run demo         # build the standalone browser demo and serve it
 npm run typecheck
 npm run build
@@ -132,6 +132,23 @@ Header *values* are deliberately not copied out of the capture. **A HAR contains
 live session tokens — treat it like a password file, and don't commit or share
 it.** The generated config has `REPLACE_WITH_YOUR_*` placeholders to fill in
 yourself. `.har` is gitignored for this reason.
+
+If you want someone else's help building the mapping, don't send them the HAR.
+Send them this instead:
+
+```bash
+npm run discover -- capture.har mybookie --share
+```
+
+That prints the endpoint with query *values* stripped, the header *names* only,
+and the response's **shape** — keys and types, no values at all. Enough to work
+out a mapping, with no tokens, cookies, account identifiers or balances in it.
+
+**If your book has no JSON API**, the tool says so and points at the pages that
+render odds directly into HTML. Some smaller books and agent portals work that
+way. There is nothing to map then — `CUSTOM_SOURCES` needs JSON — so scrape the
+page yourself and POST to `/api/ingest` instead, which is what the push route
+is for.
 
 Check the result in **Sources → Pull from an API** before trusting it: paste a
 real response and confirm the mapping preview parses it the way you expect.

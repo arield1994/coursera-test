@@ -10,12 +10,27 @@
  */
 
 import { readFileSync } from "node:fs";
-import { analyzeHar, toSourceConfig } from "../src/lib/ingest/discover";
+import {
+  analyzeHar,
+  findHtmlCandidates,
+  summarizeForSharing,
+  toSourceConfig,
+} from "../src/lib/ingest/discover";
 
-const [file, bookKey = "mybookie"] = process.argv.slice(2);
+const args = process.argv.slice(2);
+const share = args.includes("--share");
+const [file, bookKey = "mybookie"] = args.filter((a) => !a.startsWith("--"));
 
 if (!file) {
-  console.error("usage: npm run discover -- <capture.har> [book-key]");
+  console.error(
+    [
+      "usage: npm run discover -- <capture.har> [book-key] [--share]",
+      "",
+      "  --share   print a summary with no secrets in it (no header values,",
+      "            no cookies, no query values, structure only) that is safe",
+      "            to paste to someone helping you build the mapping.",
+    ].join("\n"),
+  );
   process.exit(1);
 }
 
@@ -27,9 +42,33 @@ try {
   process.exit(1);
 }
 
+if (share) {
+  console.log(JSON.stringify(summarizeForSharing(har), null, 2));
+  process.exit(0);
+}
+
 const found = analyzeHar(har);
+const htmlPages = findHtmlCandidates(har);
 
 if (found.length === 0) {
+  if (htmlPages.length > 0) {
+    console.log(
+      [
+        "No JSON API here — this book renders its odds straight into the page.",
+        "",
+        ...htmlPages.map(
+          (page) => `  ${page.url}\n    ~${page.priceCount} prices in ${Math.round(page.bytes / 1024)}KB of HTML`,
+        ),
+        "",
+        "There is nothing to map in that case: CUSTOM_SOURCES needs JSON. Scrape",
+        "the page yourself and POST the lines to /api/ingest instead — see",
+        "'Push: you send us lines' in the README. The payload format is forgiving,",
+        "and the Sources screen validates it as you paste.",
+      ].join("\n"),
+    );
+    process.exit(0);
+  }
+
   console.error(
     [
       "No odds-shaped JSON responses in that capture.",
@@ -63,6 +102,13 @@ const best = found[0];
 
 console.log("Best guess, as a CUSTOM_SOURCES entry:\n");
 console.log(`CUSTOM_SOURCES='${JSON.stringify([toSourceConfig(best, bookKey)])}'`);
+if (htmlPages.length > 0) {
+  console.log(
+    `Also saw ${htmlPages.length} server-rendered page(s) with prices in the HTML; ` +
+      "the JSON endpoint above is the better target.\n",
+  );
+}
+
 console.log(
   [
     "",

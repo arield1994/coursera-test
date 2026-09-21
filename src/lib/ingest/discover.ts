@@ -382,6 +382,154 @@ export function analyzeHar(har: unknown): DiscoveredSource[] {
   return results.sort((a, b) => b.confidence - a.confidence);
 }
 
+/* ------------------------------------------------------------------ */
+/* Server-rendered books                                               */
+/* ------------------------------------------------------------------ */
+
+export interface HtmlCandidate {
+  url: string;
+  /** Count of American-odds-looking tokens in the document. */
+  priceCount: number;
+  bytes: number;
+}
+
+/** American odds as they appear in rendered markup: +150, -110, +1200. */
+const PRICE_TOKEN = /(^|[\s>(])[+-]\d{3,4}(?=[\s<).,]|$)/g;
+
+/**
+ * Pages that render odds into HTML instead of serving JSON.
+ *
+ * Plenty of smaller books and agent portals have no front-end API at all: the
+ * server returns a finished page. There is nothing to map in that case, so
+ * these are reported separately and handled by scraping the page and pushing
+ * to /api/ingest.
+ */
+export function findHtmlCandidates(har: unknown): HtmlCandidate[] {
+  const entries = (har as { log?: { entries?: HarEntry[] } })?.log?.entries ?? [];
+  const found: HtmlCandidate[] = [];
+
+  for (const entry of entries) {
+    const url = entry.request?.url;
+    if (!url || URL_DENYLIST.test(url)) continue;
+    if ((entry.response?.status ?? 0) >= 400) continue;
+
+    const mime = entry.response?.content?.mimeType ?? "";
+    const text = entry.response?.content?.text;
+    if (!text || !mime.includes("html")) continue;
+
+    const priceCount = (text.match(PRICE_TOKEN) ?? []).length;
+    // A handful of numbers is a phone number or a date; a board has dozens.
+    if (priceCount < 12) continue;
+
+    found.push({ url, priceCount, bytes: text.length });
+  }
+
+  return found.sort((a, b) => b.priceCount - a.priceCount);
+}
+
+/* ------------------------------------------------------------------ */
+/* Shareable summary                                                   */
+/* ------------------------------------------------------------------ */
+
+/**
+ * Describe a JSON value's *shape* — keys and types, never values.
+ *
+ * A capture is full of session tokens, account identifiers and balances, so
+ * this exists to make a capture safe to show someone else while keeping the
+ * part that matters for building a mapping.
+ */
+export function describeShape(value: Json, depth = 0, maxDepth = 8): Json {
+  // Depth 8 is not arbitrary: events -> [0] -> markets -> [0] -> outcomes ->
+  // [0] -> fields is seven levels, and the outcome fields are the whole point.
+  if (depth > maxDepth) return "…";
+  if (value === null) return "null";
+  if (Array.isArray(value)) {
+    if (value.length === 0) return [];
+    // One representative element stands for the whole array.
+    return [describeShape(value[0], depth + 1, maxDepth), `…${value.length} items`];
+  }
+  if (isObject(value)) {
+    const shape: Record<string, Json> = {};
+    for (const [key, child] of Object.entries(value).slice(0, 40)) {
+      shape[key] = describeShape(child, depth + 1, maxDepth);
+    }
+    return shape;
+  }
+  if (typeof value === "string") return Number.isFinite(Date.parse(value)) ? "string(date)" : "string";
+  return typeof value;
+}
+
+export interface ShareableSummary {
+  endpoints: {
+    /** Query string values are stripped; parameter names are kept. */
+    url: string;
+    method: string;
+    confidence: number;
+    gameCount: number;
+    headerNames: string[];
+    mapping: FieldMapping;
+    shape: Json;
+    notes: string[];
+  }[];
+  htmlPages: { url: string; priceCount: number }[];
+  entryCount: number;
+}
+
+/** Strip query *values*, keeping parameter names, which are often meaningful. */
+export function redactUrl(url: string): string {
+  try {
+    const parsed = new URL(url);
+    const keys = [...parsed.searchParams.keys()];
+    parsed.search = "";
+    // Assembled by hand: assigning to `search` would percent-encode the
+    // placeholder and make the result harder to read than the original.
+    return keys.length > 0
+      ? `${parsed.toString()}?${keys.map((k) => `${k}=`).join("&")}`
+      : parsed.toString();
+  } catch {
+    return url.split("?")[0];
+  }
+}
+
+/**
+ * A summary of a capture with nothing secret in it: no header values, no
+ * cookies, no query values, and no response values — only structure.
+ */
+export function summarizeForSharing(har: unknown, limit = 3): ShareableSummary {
+  const entries = (har as { log?: { entries?: HarEntry[] } })?.log?.entries ?? [];
+  const sources = analyzeHar(har).slice(0, limit);
+
+  const shapes = new Map<string, Json>();
+  for (const entry of entries) {
+    const url = entry.request?.url;
+    const text = entry.response?.content?.text;
+    if (!url || !text) continue;
+    if (!sources.some((s) => s.url === url)) continue;
+    try {
+      shapes.set(url, describeShape(JSON.parse(text)));
+    } catch {
+      // Not parseable; analyzeHar would not have surfaced it anyway.
+    }
+  }
+
+  return {
+    endpoints: sources.map((source) => ({
+      url: redactUrl(source.url),
+      method: source.method,
+      confidence: source.confidence,
+      gameCount: source.gameCount,
+      headerNames: source.authHeaders,
+      mapping: source.mapping,
+      shape: shapes.get(source.url) ?? "…",
+      notes: source.notes,
+    })),
+    htmlPages: findHtmlCandidates(har)
+      .slice(0, 3)
+      .map((page) => ({ url: redactUrl(page.url), priceCount: page.priceCount })),
+    entryCount: entries.length,
+  };
+}
+
 /** A ready-to-paste CUSTOM_SOURCES entry for a discovered endpoint. */
 export function toSourceConfig(source: DiscoveredSource, key = "mybookie") {
   return {
