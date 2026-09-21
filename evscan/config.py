@@ -101,6 +101,7 @@ class Config:
     market: MarketConfig = field(default_factory=MarketConfig)
     filters: FilterConfig = field(default_factory=FilterConfig)
     bankroll: BankrollConfig = field(default_factory=BankrollConfig)
+    http_book: object | None = None   # populated from [book.http], if present
     sports: list[str] = field(
         default_factory=lambda: [
             "americanfootball_nfl",
@@ -153,6 +154,18 @@ def load(explicit: str | None = None) -> Config:
     cfg.source_path = path
     if "sports" in raw:
         cfg.sports = list(raw["sports"])
+
+    # [book.http] is an optional sub-table describing your book's own endpoint.
+    # It is only parsed when enabled, so a drafted-but-unfinished block is inert.
+    http_raw = dict(raw.get("book", {})).pop("http", None) or raw.get("book", {}).get("http")
+    if http_raw:
+        raw["book"] = {k: v for k, v in raw["book"].items() if k != "http"}
+        if http_raw.get("enabled"):
+            from .sources.book_http import BookHTTPError, HTTPBookConfig
+            try:
+                cfg.http_book = HTTPBookConfig.from_dict(dict(http_raw))
+            except BookHTTPError as exc:
+                raise ConfigError(f"[book.http]: {exc}") from None
     for name, target in (
         ("book", cfg.book),
         ("market", cfg.market),

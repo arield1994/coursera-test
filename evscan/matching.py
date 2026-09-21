@@ -44,6 +44,9 @@ CITY_ABBREV = {
     "wsh": "washington", "bos": "boston", "bkn": "brooklyn", "gsw": "golden state",
     "phx": "phoenix", "por": "portland", "sac": "sacramento", "uta": "utah",
     "mil": "milwaukee", "mem": "memphis", "nop": "new orleans", "okc": "oklahoma city",
+    # Slang that shares no prefix with the real name.
+    "philly": "philadelphia", "vegas": "las vegas", "jax": "jacksonville",
+    "nola": "new orleans", "cincy": "cincinnati", "frisco": "san francisco",
 }
 
 MATCH_THRESHOLD = 0.72      # minimum similarity to accept a name match
@@ -79,6 +82,25 @@ def tokens(name: str) -> set[str]:
     return set(normalize(name).split())
 
 
+def _cities_conflict(city_a: set[str], city_b: set[str]) -> bool:
+    """True when two city/qualifier token sets name genuinely different places.
+
+    Shared tokens obviously agree. So does an abbreviation: "man" against
+    "manchester", "philly" against "philadelphia". Only when nothing lines up
+    are these two different teams that happen to share a nickname.
+    """
+    if not city_a or not city_b:
+        return False
+    if city_a & city_b:
+        return False
+    for token_a in city_a:
+        for token_b in city_b:
+            shorter, longer = sorted((token_a, token_b), key=len)
+            if len(shorter) >= 3 and longer.startswith(shorter):
+                return False
+    return True
+
+
 def similarity(a: str, b: str) -> float:
     """0..1 score for two team names referring to the same team."""
     na, nb = normalize(a), normalize(b)
@@ -87,11 +109,19 @@ def similarity(a: str, b: str) -> float:
     if na == nb:
         return 1.0
 
-    ta, tb = set(na.split()), set(nb.split())
+    words_a, words_b = na.split(), nb.split()
+    ta, tb = set(words_a), set(words_b)
     shared = ta & tb
     if shared:
-        # A shared *last* token is the nickname and is highly distinctive.
-        nickname_match = na.split()[-1] == nb.split()[-1]
+        # A shared *last* token is the nickname and is highly distinctive --
+        # unless the cities disagree. Several leagues run the same nickname in
+        # two cities (NY/SF Giants, NY/TEX Rangers, ARI/STL Cardinals,
+        # CAR/FLA Panthers, LA/SAC Kings), and matching those to each other
+        # would price a bet against the wrong game.
+        nickname_match = words_a[-1] == words_b[-1]
+        city_a, city_b = ta - {words_a[-1]}, tb - {words_b[-1]}
+        if nickname_match and _cities_conflict(city_a, city_b):
+            return 0.30
         coverage = len(shared) / min(len(ta), len(tb))
         if nickname_match:
             return min(1.0, 0.88 + 0.12 * coverage)
