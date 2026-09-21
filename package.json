@@ -13,7 +13,8 @@
     "test:watch": "vitest",
     "demo:build": "node demo/build.mjs",
     "demo": "node demo/build.mjs && npx http-server demo/dist -p 4173 -s",
-    "discover": "tsx scripts/discover.ts"
+    "discover": "tsx scripts/discover.ts",
+    "sniffer": "node scripts/build-sniffer.mjs"
   },
   "dependencies": {
     "next": "15.5.4",

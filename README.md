@@ -27,7 +27,7 @@ cp .env.example .env
 ```
 
 ```bash
-npm test             # 98 tests over the odds/EV/arbitrage/ingest engine
+npm test             # 99 tests over the odds/EV/arbitrage/ingest engine
 npm run demo         # build the standalone browser demo and serve it
 npm run typecheck
 npm run build
@@ -102,8 +102,37 @@ scraper that dies disappears from the board instead of leaving stale prices up.
 ### Finding your book's endpoint
 
 If you don't already know your book's API, you don't have to guess. Almost every
-sportsbook site is a JavaScript front end talking to its own JSON API, and the
-browser will show you exactly where:
+sportsbook site is a JavaScript front end talking to its own JSON API.
+
+**The quick way — paste one snippet.** Build it once:
+
+```bash
+npm run sniffer            # -> demo/dist/edgescan-sniffer.js
+```
+
+Open your book's site, log in, open DevTools → Console, paste the file's
+contents, and browse to a page showing odds. It wraps `fetch` and
+`XMLHttpRequest`, watches the JSON going past, and works out which request
+carries the prices:
+
+```
+__edgescan.report()    what it found, and a ready CUSTOM_SOURCES line
+copy(__edgescan.env())     the config, with your live URL — keep it private
+copy(__edgescan.share())   a version with every value stripped — safe to send
+__edgescan.stop()      restore fetch/XHR
+```
+
+It only reads: requests pass through untouched, every hook is wrapped so it
+cannot break the page, and `stop()` restores the originals. Because it runs in
+your logged-in session it sees exactly what you see, including endpoints that
+are cookie-gated — and it reports when a request carried no auth header, which
+means the session is cookie-based and the Cookie header is what you need to
+copy.
+
+Chrome asks you to type `allow pasting` in the console the first time.
+
+**The thorough way — a full capture.** If the snippet finds nothing, or you want
+the whole picture at once:
 
 1. Open the book's odds page with DevTools on the **Network** tab, filtered to
    **Fetch/XHR**, and reload so the tab is recording from the start.
@@ -116,7 +145,7 @@ Then let EdgeScan read it:
 npm run discover -- capture.har mybookie
 ```
 
-It scores every JSON response for how much it looks like odds, ignores the
+Same inference, run over a saved HAR instead of a live session. It scores every JSON response for how much it looks like odds, ignores the
 tracking and asset noise, and prints a ready-to-paste `CUSTOM_SOURCES` entry
 with the mapping already worked out — which field holds the teams, where the
 markets and outcomes are nested, whether prices are American or decimal, and
@@ -283,6 +312,7 @@ src/lib/ingest/    types.ts (payload + validation) · store.ts (TTL, per source)
                    merge.ts (attach onto the board) · pull.ts (private APIs)
                    auth.ts (shared-secret guard) · discover.ts (find an API)
 scripts/discover.ts CLI: read a browser HAR, infer the endpoint and mapping
+demo/sniffer.ts    console snippet: find the endpoint from a live session
 demo/              standalone browser build of the real app (no server)
 src/lib/providers/ theOddsApi.ts (live) · mock.ts (demo feed) · index.ts
 src/lib/cache.ts   TTL cache with in-flight request de-duplication

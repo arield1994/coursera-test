@@ -97,8 +97,16 @@ function findKey(
 const isString = (v: Json) => typeof v === "string" && v.length > 0;
 const isNumeric = (v: Json) =>
   typeof v === "number" || (typeof v === "string" && Number.isFinite(Number(v.replace(/^\+/, ""))));
+/**
+ * Date.parse is far too eager on short numeric strings — it reads "2.10" as a
+ * date, so a decimal price would otherwise be labelled a timestamp. A real
+ * date string carries a separator and some length.
+ */
+const looksLikeDateString = (v: string) =>
+  v.length >= 8 && /[-:T/]/.test(v) && Number.isFinite(Date.parse(v));
+
 const isDateish = (v: Json) =>
-  (typeof v === "string" && Number.isFinite(Date.parse(v))) ||
+  (typeof v === "string" && looksLikeDateString(v)) ||
   (typeof v === "number" && v > 1_000_000_000);
 
 interface OutcomeLocation {
@@ -455,7 +463,7 @@ export function describeShape(value: Json, depth = 0, maxDepth = 8): Json {
     }
     return shape;
   }
-  if (typeof value === "string") return Number.isFinite(Date.parse(value)) ? "string(date)" : "string";
+  if (typeof value === "string") return looksLikeDateString(value) ? "string(date)" : "string";
   return typeof value;
 }
 

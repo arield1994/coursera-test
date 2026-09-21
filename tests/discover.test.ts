@@ -335,6 +335,17 @@ describe("shareable summary", () => {
     expect(redactUrl("https://x.example/a")).toBe("https://x.example/a");
   });
 
+  it("does not mistake a decimal price for a date", () => {
+    // Date.parse("2.10") succeeds in V8, so a naive check labels every decimal
+    // price a timestamp — and would then offer it as the start-time field.
+    const shape = describeShape({ price: "2.10", kickoff: "2030-02-02T15:00:00Z" }) as Record<
+      string,
+      unknown
+    >;
+    expect(shape.price).toBe("string");
+    expect(shape.kickoff).toBe("string(date)");
+  });
+
   it("describes structure without carrying any values", () => {
     const shape = describeShape({ a: 1, b: "hello", c: [{ d: true }] }) as Record<string, unknown>;
     expect(shape.a).toBe("number");
