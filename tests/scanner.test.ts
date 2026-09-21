@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { scanForEv, groupMarkets } from "../src/lib/ev/scanner";
+import { scanForEv, groupMarkets, fairLines } from "../src/lib/ev/scanner";
+import { marketGroupKey, outcomeKey } from "../src/lib/odds/types";
 import { generateMockEvents } from "../src/lib/providers/mock";
 import { balancedPinnacleMoneyline, event, market, HOUR } from "./fixtures";
 
@@ -236,10 +237,60 @@ describe("scanner", () => {
       expect(o.stake).toBeGreaterThanOrEqual(0);
       expect(["pinnacle", "circasports", "betfair_ex_eu"]).not.toContain(o.book);
     }
-    // Edges should be mostly modest; a board full of 20% plays means the
-    // model is broken, not that we found a goldmine.
-    const median = found[Math.floor(found.length / 2)].evPercent;
-    expect(median).toBeLessThan(10);
+    // Edges should be mostly modest. A board where the typical play is a 10%
+    // edge means the fair line is wrong, not that we found a goldmine -- so
+    // the demo feed is held to a distribution a real board could produce.
+    const edges = found.map((o) => o.evPercent).sort((a, b) => a - b);
+    const median = edges[Math.floor(edges.length / 2)];
+    expect(median).toBeLessThan(4);
+    expect(edges[Math.floor(edges.length * 0.9)]).toBeLessThan(10);
+  });
+
+  it("keeps the demo board thin, the way a real one is", () => {
+    // 30 games producing hundreds of qualifying bets would mean the scanner is
+    // finding noise. A dozen or two is what a real slate looks like.
+    const events = generateMockEvents({ seed: 21 });
+    const found = scanForEv(events, {
+      sharpBooks: ["pinnacle", "circasports", "betfair_ex_eu"],
+      minEvPercent: 1,
+    });
+    expect(found.length).toBeGreaterThan(3);
+    expect(found.length).toBeLessThan(events.length * 2);
+  });
+
+  it("flags the dead lines rather than presenting them as the best bets", () => {
+    const found = scanForEv(generateMockEvents({ seed: 4 }), {
+      sharpBooks: ["pinnacle", "circasports", "betfair_ex_eu"],
+      minEvPercent: 1,
+    });
+    for (const o of found) {
+      if (o.evPercent >= 12) expect(o.flags).toContain("stale-suspect");
+      if (o.flags.includes("stale-suspect")) {
+        expect(o.evPercent).toBeGreaterThanOrEqual(12);
+      }
+    }
+  });
+
+  it("exposes the same fair line the odds screen renders", () => {
+    // The odds screen looks fair prices up from fairLines(). If that ever
+    // disagreed with what scanForEv priced against, the two screens would
+    // quote different fair odds for one market.
+    const events = generateMockEvents({ seed: 5 });
+    const options = { sharpBooks: ["pinnacle", "circasports", "betfair_ex_eu"] };
+    const lines = fairLines(events, options);
+    const found = scanForEv(events, { ...options, minEvPercent: -100 });
+
+    expect(found.length).toBeGreaterThan(20);
+    for (const row of found) {
+      const event = events.find((e) => e.id === row.eventId)!;
+      const market = event.markets.find(
+        (m) => m.bookmaker === row.book && m.marketKey === row.marketKey,
+      )!;
+      const outcome = market.outcomes.find((o) => outcomeKey(o) === row.outcomeKey)!;
+      const line = lines.get(`${event.id}|${marketGroupKey(market, outcome)}`);
+      expect(line, row.id).toBeDefined();
+      expect(line!.probabilities.get(row.outcomeKey)).toBeCloseTo(row.fairProbability, 12);
+    }
   });
 
   it("is more conservative under worst-case devigging than under multiplicative", () => {

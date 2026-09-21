@@ -97,12 +97,19 @@ export function marketGroupKey(market: BookMarket, outcome: Outcome): string {
   return parts.join("|").toLowerCase();
 }
 
-/** Human label for a side, e.g. "Over 45.5" or "Lakers -3.5". */
-export function describeOutcome(outcome: Outcome): string {
+/**
+ * Human label for a side, e.g. "Over 45.5" or "Lakers -3.5".
+ *
+ * The explicit "+" belongs on a handicap, where the sign is the bet: "Lakers
+ * +3.5" and "Lakers -3.5" are opposite sides. On a total the number is just a
+ * threshold, so "Over +45.5" is noise that reads like a price.
+ */
+export function describeOutcome(outcome: Outcome, marketKey?: string): string {
+  const signed = marketKey === undefined || marketKey.includes("spread");
   const point =
     outcome.point === undefined
       ? ""
-      : ` ${outcome.point > 0 ? "+" : ""}${outcome.point}`;
+      : ` ${signed && outcome.point > 0 ? "+" : ""}${outcome.point}`;
   const player = outcome.description ? `${outcome.description} ` : "";
   return `${player}${outcome.name}${point}`.trim();
 }

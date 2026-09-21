@@ -57,6 +57,13 @@ interface LeagueSpec {
   totalSpread: number;
   /** Typical spread magnitude. */
   handicapScale: number;
+  /**
+   * How much win probability one unit of line movement is worth. A point of
+   * NFL total barely matters; a goal of EPL total is enormous. Without this a
+   * book hanging a different number would be mispriced rather than merely
+   * different.
+   */
+  lineSensitivity: number;
   hasDraw: boolean;
 }
 
@@ -68,6 +75,7 @@ const LEAGUES: LeagueSpec[] = [
     totalCenter: 44.5,
     totalSpread: 7,
     handicapScale: 6,
+    lineSensitivity: 0.026,
     hasDraw: false,
     teams: [
       "Kansas City Chiefs", "Buffalo Bills", "Philadelphia Eagles", "San Francisco 49ers",
@@ -82,6 +90,7 @@ const LEAGUES: LeagueSpec[] = [
     totalCenter: 224.5,
     totalSpread: 12,
     handicapScale: 7,
+    lineSensitivity: 0.019,
     hasDraw: false,
     teams: [
       "Boston Celtics", "Denver Nuggets", "Oklahoma City Thunder", "Minnesota Timberwolves",
@@ -96,6 +105,7 @@ const LEAGUES: LeagueSpec[] = [
     totalCenter: 8.5,
     totalSpread: 1.5,
     handicapScale: 1.5,
+    lineSensitivity: 0.105,
     hasDraw: false,
     teams: [
       "Los Angeles Dodgers", "Atlanta Braves", "Houston Astros", "New York Yankees",
@@ -110,6 +120,7 @@ const LEAGUES: LeagueSpec[] = [
     totalCenter: 6.5,
     totalSpread: 0.75,
     handicapScale: 1.5,
+    lineSensitivity: 0.17,
     hasDraw: false,
     teams: [
       "Florida Panthers", "Edmonton Oilers", "Colorado Avalanche", "New York Rangers",
@@ -124,6 +135,7 @@ const LEAGUES: LeagueSpec[] = [
     totalCenter: 2.5,
     totalSpread: 0.5,
     handicapScale: 1,
+    lineSensitivity: 0.26,
     hasDraw: true,
     teams: [
       "Manchester City", "Arsenal", "Liverpool", "Aston Villa",
@@ -172,9 +184,18 @@ function bookOpinion(fair: number[], noise: number, rng: () => number): number[]
 
 interface BuiltMarket {
   key: string;
-  /** Outcome templates, without prices. */
-  sides: { name: string; point?: number }[];
-  fair: number[];
+  /**
+   * The market as it would be priced at a given line offset. Books do not all
+   * hang the same number, and a book on a different number is offering a
+   * different bet — not a mispriced version of the same one.
+   */
+  at: (delta: number) => { sides: { name: string; point?: number }[]; fair: number[] };
+  /** Moneylines have no number to disagree about. */
+  shiftable: boolean;
+}
+
+function clampProbability(p: number): number {
+  return Math.min(0.97, Math.max(0.03, p));
 }
 
 function buildEventMarkets(league: LeagueSpec, rng: () => number): BuiltMarket[] {
@@ -187,41 +208,75 @@ function buildEventMarkets(league: LeagueSpec, rng: () => number): BuiltMarket[]
   const h2hFair = league.hasDraw
     ? [homeRaw * (1 - drawShare), drawShare, (1 - homeRaw) * (1 - drawShare)]
     : [homeRaw, 1 - homeRaw];
+
   markets.push({
     key: "h2h",
-    sides: league.hasDraw
-      ? [{ name: "HOME" }, { name: "Draw" }, { name: "AWAY" }]
-      : [{ name: "HOME" }, { name: "AWAY" }],
-    fair: h2hFair,
+    shiftable: false,
+    at: () => ({
+      sides: league.hasDraw
+        ? [{ name: "HOME" }, { name: "Draw" }, { name: "AWAY" }]
+        : [{ name: "HOME" }, { name: "AWAY" }],
+      fair: h2hFair,
+    }),
   });
 
-  // Spread, placed near the number that makes the game a coin flip.
+  // Spread, placed near the number that makes the game a coin flip. Giving the
+  // favourite more points lowers its cover probability, hence the sign.
   const handicapRaw = (homeRaw - 0.5) * league.handicapScale * 2;
   const handicap = -Math.round(handicapRaw * 2) / 2 || -0.5;
   const spreadHome = 0.5 + gaussian(rng) * 0.02;
+
   markets.push({
     key: "spreads",
-    sides: [
-      { name: "HOME", point: handicap },
-      { name: "AWAY", point: -handicap },
-    ],
-    fair: [spreadHome, 1 - spreadHome],
+    shiftable: true,
+    at: (delta) => {
+      const point = handicap + delta;
+      const home = clampProbability(spreadHome + delta * league.lineSensitivity);
+      return {
+        sides: [
+          { name: "HOME", point },
+          { name: "AWAY", point: -point },
+        ],
+        fair: [home, 1 - home],
+      };
+    },
   });
 
-  // Total.
+  // Total. Raising the number makes the over less likely.
   const totalLine =
     Math.round((league.totalCenter + gaussian(rng) * league.totalSpread) * 2) / 2;
   const overProb = 0.5 + gaussian(rng) * 0.02;
+
   markets.push({
     key: "totals",
-    sides: [
-      { name: "Over", point: totalLine },
-      { name: "Under", point: totalLine },
-    ],
-    fair: [overProb, 1 - overProb],
+    shiftable: true,
+    at: (delta) => {
+      const over = clampProbability(overProb - delta * league.lineSensitivity);
+      return {
+        sides: [
+          { name: "Over", point: totalLine + delta },
+          { name: "Under", point: totalLine + delta },
+        ],
+        fair: [over, 1 - over],
+      };
+    },
   });
 
   return markets;
+}
+
+/**
+ * How far this book's number sits from the market's. Sharp books cluster on the
+ * consensus number; soft books drift, which is what creates middles and what
+ * the EV scanner must refuse to price across.
+ */
+function lineOffset(sharp: boolean, rng: () => number): number {
+  const roll = rng();
+  if (sharp) return roll < 0.94 ? 0 : roll < 0.98 ? 0.5 : -0.5;
+  if (roll < 0.72) return 0;
+  if (roll < 0.84) return 0.5;
+  if (roll < 0.96) return -0.5;
+  return roll < 0.98 ? 1 : -1;
 }
 
 export interface MockOptions {
@@ -258,27 +313,48 @@ export function generateMockEvents(options: MockOptions = {}): GameEvent[] {
         // Not every book prices every game.
         if (rng() > (profile.sharp ? 0.95 : 0.82)) continue;
 
-        const noise = profile.sharp ? 0.015 : 0.045;
+        // Soft books track the sharp line closely -- they are not stupid, they
+        // are just slower and greedier. Most of a real board's edge comes from
+        // staleness and price rounding, not from a book holding a wildly
+        // different opinion, so this noise stays small on purpose.
+        const noise = profile.sharp ? 0.008 : 0.012;
         const vigBase = profile.sharp ? 0.022 : 0.045;
         const skew = profile.sharp ? 0.985 : 0.94;
 
         for (const market of built) {
           if (!profile.sharp && market.key !== "h2h" && rng() > 0.88) continue;
 
-          const opinion = bookOpinion(market.fair, noise, rng);
+          const delta = market.shiftable ? lineOffset(profile.sharp, rng) : 0;
+          const { sides, fair } = market.at(delta);
+
+          const opinion = bookOpinion(fair, noise, rng);
           const vig = vigBase + rng() * 0.012;
           let prices = postPrices(opinion, vig, skew);
 
           // Occasionally a soft book leaves one side stale or over-promotes it.
           // This is the thing the scanner exists to find.
-          if (!profile.sharp && rng() < 0.16) {
-            const side = Math.floor(rng() * prices.length);
-            prices = prices.map((p, idx) =>
-              idx === side ? roundToMarketPrice(p * (1 + 0.04 + rng() * 0.09)) : p,
-            );
+          if (!profile.sharp) {
+            const roll = rng();
+            // Most staleness is small: the book is a step behind a line that
+            // moved. Occasionally one is genuinely dead -- a number left up
+            // after news the market already priced in. Those are the rows a
+            // scanner must flag rather than celebrate, so the demo board needs
+            // a few of them.
+            const boost =
+              roll < 0.0025
+                ? 0.09 + rng() * 0.09
+                : roll < 0.055
+                  ? 0.02 + rng() * 0.05
+                  : 0;
+            if (boost > 0) {
+              const side = Math.floor(rng() * prices.length);
+              prices = prices.map((p, idx) =>
+                idx === side ? roundToMarketPrice(p * (1 + boost)) : p,
+              );
+            }
           }
 
-          const outcomes: Outcome[] = market.sides.map((side, idx) => ({
+          const outcomes: Outcome[] = sides.map((side, idx) => ({
             name:
               side.name === "HOME" ? homeTeam : side.name === "AWAY" ? awayTeam : side.name,
             price: prices[idx],

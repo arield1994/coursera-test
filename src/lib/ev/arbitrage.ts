@@ -108,7 +108,7 @@ export function findArbitrage(
           best.set(key, {
             decimal: outcome.price,
             book: bookKey,
-            selection: describeOutcome(outcome),
+            selection: describeOutcome(outcome, group.marketKey),
           });
         }
       }
@@ -251,7 +251,7 @@ export function findMiddles(
           byLine.set(outcome.point, {
             decimal: outcome.price,
             book: market.bookmaker,
-            selection: describeOutcome(outcome),
+            selection: describeOutcome(outcome, market.marketKey),
           });
         }
       }

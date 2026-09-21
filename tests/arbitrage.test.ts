@@ -149,6 +149,32 @@ describe("middles", () => {
     expect(middles.every((m) => m.highLine > m.lowLine)).toBe(true);
   });
 
+  it("finds middles on the demo board, because books there disagree on the number", () => {
+    // Middles are only possible when books hang different lines. If the demo
+    // feed ever went back to giving every book the same number this would
+    // silently return nothing and the middles screen would look broken.
+    const events = generateMockEvents({ seed: 2 });
+
+    const totalsLines = new Set<number>();
+    for (const event of events) {
+      for (const market of event.markets) {
+        if (market.marketKey !== "totals" || event.id !== events[0].id) continue;
+        for (const outcome of market.outcomes) {
+          if (outcome.point !== undefined) totalsLines.add(outcome.point);
+        }
+      }
+    }
+    expect(totalsLines.size).toBeGreaterThan(1);
+
+    const middles = findMiddles(events, { maxCostPercent: 6, minWindowWidth: 0.5 });
+    expect(middles.length).toBeGreaterThan(0);
+    for (const middle of middles) {
+      expect(middle.highLine).toBeGreaterThan(middle.lowLine);
+      expect(middle.legs[0].book).not.toBe(middle.legs[1].book);
+      expect(middle.legs[0].stake + middle.legs[1].stake).toBeCloseTo(500, 1);
+    }
+  });
+
   it("rejects middles that cost too much to hold", () => {
     const events = [
       event([

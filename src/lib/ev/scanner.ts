@@ -108,7 +108,7 @@ export interface EvOpportunity {
   flags: OpportunityFlag[];
 }
 
-interface MarketGroup {
+export interface MarketGroup {
   event: GameEvent;
   key: string;
   marketKey: string;
@@ -148,10 +148,13 @@ export function groupMarkets(events: GameEvent[]): MarketGroup[] {
   return [...groups.values()];
 }
 
-interface FairLine {
+export interface FairLine {
+  /** Fair probability per outcome key. Under `worstCase` these are per-side
+   *  lower bounds and will sum to less than 1 -- see `isDistribution`. */
   probabilities: Map<string, number>;
   sharpBooksUsed: string[];
   meanOverround: number;
+  isDistribution: boolean;
 }
 
 /**
@@ -220,7 +223,28 @@ function buildFairLine(
     probabilities: new Map(orderedKeys.map((k, i) => [k, blended[i]])),
     sharpBooksUsed: used,
     meanOverround: overrounds.reduce((s, o) => s + o, 0) / overrounds.length,
+    isDistribution: blendIsDistribution,
   };
+}
+
+/**
+ * Fair lines for every market on the board, keyed by market group.
+ *
+ * Exported so the odds screen renders the *same* fair number the scanner
+ * prices against. Recomputing it there with a different book-selection rule is
+ * how a tool ends up quoting two different fair prices for one market.
+ */
+export function fairLines(
+  events: GameEvent[],
+  overrides: Partial<ScanOptions> = {},
+): Map<string, FairLine> {
+  const options: ScanOptions = { ...DEFAULT_SCAN_OPTIONS, ...overrides };
+  const result = new Map<string, FairLine>();
+  for (const group of groupMarkets(events)) {
+    const fair = buildFairLine(group, options);
+    if (fair) result.set(group.key, fair);
+  }
+  return result;
 }
 
 /** Best decimal price offered on each side, across every book in the group. */
@@ -306,7 +330,7 @@ export function scanForEv(
 
           marketKey: group.marketKey,
           marketName: marketLabel(group.marketKey),
-          selection: describeOutcome(outcome),
+          selection: describeOutcome(outcome, group.marketKey),
           outcomeKey: key,
           point: outcome.point,
 
