@@ -1,7 +1,14 @@
 # Never commit these: a HAR export contains live session cookies.
 *.har
 .env
+
+# Generated at run time, not source.
 .evscan-cache/
+.evscan-history.db
+results.json
+results.json.tmp
+
+# Yours, not the repo's.
 evscan.toml
 lines.csv
 
