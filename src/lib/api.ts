@@ -17,6 +17,9 @@ import {
 import { ProviderError } from "./providers/types";
 import type { GameEvent } from "./odds/types";
 import { DEVIG_METHODS, type DevigMethod } from "./ev/devig";
+import { activeSources, recordMatchStats } from "./ingest/store";
+import { attachCustomLines, type MergeStats } from "./ingest/merge";
+import { pullAllSources, pullSourceConfigs } from "./ingest/pull";
 
 export function list(params: URLSearchParams, key: string, fallback: string[] = []): string[] {
   const raw = params.get(key);
@@ -51,7 +54,12 @@ export interface FeedSlice {
   demo: boolean;
   sportKeys: string[];
   marketKeys: string[];
+  /** Per-source match counts, so a misconfigured scraper is visible. */
+  custom: MergeStats[];
 }
+
+/** How long a pull source's response is reused before polling it again. */
+export const PULL_TTL_MS = Number(process.env.CUSTOM_SOURCE_TTL_MS ?? 20_000);
 
 /**
  * Fetch the requested slice of the board, cached per (sports, markets) shape.
@@ -66,11 +74,33 @@ export async function loadEvents(params: URLSearchParams): Promise<FeedSlice> {
   const provider = getProvider();
 
   const key = `odds:${provider.name}:${[...sportKeys].sort().join(",")}:${[...marketKeys].sort().join(",")}`;
-  const events = await cached(key, ODDS_TTL_MS, () =>
+  const base = await cached(key, ODDS_TTL_MS, () =>
     provider.fetchOdds({ sportKeys, marketKeys }),
   );
 
-  return { events, demo: provider.isDemo, sportKeys, marketKeys };
+  // Poll any configured private-API sources on their own schedule, then fold
+  // both them and anything pushed to /api/ingest onto the board.
+  if (pullSourceConfigs().length > 0) {
+    await cached("pull:sources", PULL_TTL_MS, () => pullAllSources());
+  }
+
+  const sources = activeSources();
+  const marketFilter = new Set(marketKeys);
+  const { events, stats } = attachCustomLines(base, sources);
+  for (const stat of stats) {
+    recordMatchStats(stat.book, stat.matched, stat.unmatched);
+  }
+
+  // Custom sources may carry markets the caller did not ask for.
+  const filtered =
+    marketFilter.size === 0
+      ? events
+      : events.map((event) => ({
+          ...event,
+          markets: event.markets.filter((m) => marketFilter.has(m.marketKey)),
+        }));
+
+  return { events: filtered, demo: provider.isDemo, sportKeys, marketKeys, custom: stats };
 }
 
 export function ok<T>(data: T, meta: Record<string, unknown>) {

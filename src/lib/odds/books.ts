@@ -45,9 +45,41 @@ export const BOOKS: BookProfile[] = [
 
 const BY_KEY = new Map(BOOKS.map((b) => [b.key, b]));
 
+/**
+ * Books added at runtime: private bookie APIs and scrapers registered through
+ * /api/ingest or a configured pull source.
+ *
+ * Kept separate from BOOKS so the built-in registry stays a constant, and so
+ * a custom source can never silently redefine what "pinnacle" means.
+ */
+const CUSTOM_BY_KEY = new Map<string, BookProfile>();
+
+export function registerBook(profile: BookProfile): BookProfile {
+  if (BY_KEY.has(profile.key)) {
+    // Built-ins win. Otherwise a scraper claiming key "pinnacle" could promote
+    // itself into the fair line.
+    return BY_KEY.get(profile.key)!;
+  }
+  CUSTOM_BY_KEY.set(profile.key, profile);
+  return profile;
+}
+
+export function unregisterBook(key: string): void {
+  CUSTOM_BY_KEY.delete(key);
+}
+
+export function customBooks(): BookProfile[] {
+  return [...CUSTOM_BY_KEY.values()];
+}
+
+export function isCustomBook(key: string): boolean {
+  return CUSTOM_BY_KEY.has(key);
+}
+
 export function bookProfile(key: string): BookProfile {
   return (
-    BY_KEY.get(key) ?? {
+    BY_KEY.get(key) ??
+    CUSTOM_BY_KEY.get(key) ?? {
       key,
       title: key.replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase()),
       // Unknown books are assumed soft: treating an unknown book as sharp would
@@ -67,3 +99,8 @@ export const DEFAULT_SHARP_BOOKS = ["pinnacle", "circasports", "betfair_ex_eu"];
 
 export const SHARP_BOOKS = BOOKS.filter((b) => b.sharp);
 export const SOFT_BOOKS = BOOKS.filter((b) => !b.sharp);
+
+/** Built-ins plus anything registered at runtime, for pickers and filters. */
+export function allBooks(): BookProfile[] {
+  return [...BOOKS, ...CUSTOM_BY_KEY.values()];
+}

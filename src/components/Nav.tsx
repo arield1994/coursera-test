@@ -9,6 +9,7 @@ const LINKS = [
   { href: "/middles", label: "Middles" },
   { href: "/odds", label: "Odds Screen" },
   { href: "/tracker", label: "Bet Tracker" },
+  { href: "/sources", label: "Sources" },
   { href: "/settings", label: "Settings" },
 ];
 
