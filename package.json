@@ -1,0 +1,36 @@
+{
+  "name": "edgescan",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "next dev",
+    "build": "next build",
+    "start": "next start",
+    "lint": "next lint",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "demo:build": "node demo/build.mjs",
+    "demo": "node demo/build.mjs && npx http-server demo/dist -p 4173 -s",
+    "discover": "tsx scripts/discover.ts",
+    "sniffer": "node scripts/build-sniffer.mjs"
+  },
+  "dependencies": {
+    "next": "15.5.4",
+    "react": "19.1.1",
+    "react-dom": "19.1.1"
+  },
+  "devDependencies": {
+    "@tailwindcss/cli": "^4.3.3",
+    "@tailwindcss/postcss": "^4.1.13",
+    "@types/node": "^22.15.3",
+    "@types/react": "^19.1.9",
+    "@types/react-dom": "^19.1.7",
+    "esbuild": "^0.28.2",
+    "tailwindcss": "^4.1.13",
+    "tsx": "^4.23.15",
+    "typescript": "^5.8.3",
+    "vitest": "^3.2.4"
+  }
+}
