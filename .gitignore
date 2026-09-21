@@ -1,0 +1,12 @@
+# Never commit these: a HAR export contains live session cookies.
+*.har
+.env
+.evscan-cache/
+evscan.toml
+lines.csv
+
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.venv/
+venv/
